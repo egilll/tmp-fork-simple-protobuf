@@ -1,0 +1,9 @@
+syntax = "proto2";
+import "nanopb.proto";
+
+option java_package = "asdf";
+
+message ExampleNanoPb {
+  optional string ssid = 1  [(nanopb).max_size = 32];
+  optional string password = 2  [(nanopb).max_size = 64];
+}

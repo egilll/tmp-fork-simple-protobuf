@@ -20,10 +20,16 @@ struct comma : one< ',' > {};
 struct dot : one< '.' > {};
 struct equ : one< '=' > {};
 struct semi : one< ';' > {};
+struct colon     : one< ':' > {};
+struct l_bracket : one< '[' > {};
+struct r_bracket : one< ']' > {};
+struct l_angle   : one< '<' > {};
+struct r_angle   : one< '>' > {};
 
 struct option;
 struct message;
 struct extend;
+struct extensions;    
 
 struct ident_first : ranges< 'a', 'z', 'A', 'Z' > {};  // NOTE: Yes, no '_'.
 struct ident_other : ranges< 'a', 'z', 'A', 'Z', '0', '9', '_' > {};
@@ -65,7 +71,33 @@ template< char Q >
 struct str_impl : if_must< one< Q >, str_lit_value< Q >, one< Q > > {};
 struct str_lit : sor< str_impl< '\'' >, str_impl< '"' > > {};
 
-struct constant : sor< bool_lit, seq< opt< sign >, float_lit >, seq< opt< sign >, int_lit >, str_lit, full_ident > {};
+struct constant;
+struct field_name;
+struct message_lit_with_braces;
+struct message_literal_field_name
+    : sor< field_name, seq< l_bracket, full_ident, r_bracket > > {};
+
+struct message_lit_with_angles;
+
+struct message_value
+    : sor< message_lit_with_angles, message_lit_with_braces, constant > {};
+
+struct message_literal_field
+    : seq< message_literal_field_name, sps,
+           opt< colon, sps >,
+           message_value > {};
+
+struct message_text_format
+    : star< seq< sps, message_literal_field, sps,
+                 opt< sor< comma, semi >, sps > > > {};
+
+struct message_lit_with_angles
+    : if_must< l_angle, sps, message_text_format, sps, r_angle > {};
+
+struct message_lit_with_braces
+    : if_must< one< '{' >, sps, message_text_format, sps, one< '}' > > {};
+
+struct constant : sor< bool_lit, seq< opt< sign >, float_lit >, seq< opt< sign >, int_lit >, str_lit, message_lit_with_braces, full_ident > {};
 
 struct option_name : seq< sor< ident, if_must< one< '(' >, full_ident, one< ')' > > >, star_must< dot, ident > > {};
 struct option : if_must< keyword< 'o', 'p', 't', 'i', 'o', 'n' >, sps, option_name, sps, equ, sps, constant, sps, semi > {};
@@ -93,6 +125,8 @@ struct defined_type : seq< opt< dot >, full_ident > {};  // NOTE: This replaces 
 
 struct type : sor< builtin_type, defined_type > {};
 
+/** Todo: Only allow for Proto2 */
+struct field_required : keyword< 'r', 'e', 'q', 'u', 'i', 'r', 'e', 'd' > {};
 struct field_optional : keyword< 'o', 'p', 't', 'i', 'o', 'n', 'a', 'l' > {};
 struct field_repeated : keyword< 'r', 'e', 'p', 'e', 'a', 't', 'e', 'd' > {};
 struct field_option : if_must< option_name, sps, equ, sps, constant > {};
@@ -100,7 +134,7 @@ struct field_options : if_must< one< '[' >, sps, list< field_option, comma, sp >
 struct field_name : ident {};
 struct field_number : int_lit {};
 struct field : seq<
-  opt< sor< field_optional, field_repeated >, sps >,
+  opt< sor< field_required, field_optional, field_repeated >, sps >,
   type, sps,
   field_name, sps,
   equ, sps,
@@ -121,10 +155,22 @@ struct key_type : seq<
 struct map_name : ident {};
 struct map_field : if_must< keyword< 'm', 'a', 'p' >, sps, one< '<' >, sps, key_type, sps, comma, sps, type, sps, one< '>' >, sps, map_name, sps, equ, sps, field_number, sps, opt< field_options, sps >, semi > {};
 
-struct range : if_must< int_lit, opt<sps, keyword< 't', 'o' >, sps, sor< int_lit, keyword< 'm', 'a', 'x' > > > > {};
+
+struct max_keyword : keyword< 'm', 'a', 'x' > {};
+
+struct range : if_must< int_lit, opt<sps, keyword< 't', 'o' >, sps, sor< int_lit, max_keyword > > > {};
 struct ranges : list_must< range, comma, sp > {};
 struct field_names : list_must< field_name, comma, sp > {};
 struct reserved : if_must< keyword< 'r', 'e', 's', 'e', 'r', 'v', 'e', 'd' >, sps, must<sor< ranges, field_names >>, sps, must<semi> > {};
+
+struct extensions
+    : if_must<
+          keyword< 'e', 'x', 't', 'e', 'n', 's', 'i', 'o', 'n', 's' >, sps,
+          must< ranges >,                
+          sps,
+          opt< field_options, sps >,     
+          semi >
+{};
 
 struct enum_name : ident {};
 struct enum_value_option : seq< option_name, sps, equ, sps, constant > {};
@@ -132,7 +178,8 @@ struct enum_field : seq< ident, sps, equ, sps, enum_int, sps, opt_must< one< '['
 struct enum_body : if_must< one< '{' >, sps, star< sor< option, enum_field, semi, reserved >, sps >, one< '}' > > {};
 struct enum_def : if_must< keyword< 'e', 'n', 'u', 'm' >, sps, enum_name, sps, enum_body > {};
 
-struct message_thing : sor< field, enum_def, message, option, oneof, map_field, reserved, extend, semi > {};
+struct message_thing : sor< field, enum_def, message, option, oneof, map_field,
+                           reserved, extensions, extend, semi > {};
 struct message_body : seq< one<'{'>, sps, star< message_thing, sps >, one<'}'> > {};
 struct message_name : defined_type {};
 struct message : if_must< keyword< 'm', 'e', 's', 's', 'a', 'g', 'e' >, sps, message_name, sps, message_body > {};
@@ -154,17 +201,26 @@ struct body : sor< import, package, option, message, enum_def, service, extend, 
 
 struct quote : one< '\'', '"' > {};
 
-struct head : if_must< keyword< 's', 'y', 'n', 't', 'a', 'x' >, sps, equ, sps, quote, string< 'p', 'r', 'o', 't', 'o', '3' >, quote, sps, semi > {};
+
 
 namespace proto2 {
-  struct file : must< sps, head, sps, star< body, sps >, eof > {};
+  struct head : seq< keyword< 's', 'y', 'n', 't', 'a', 'x' >, sps, equ, sps, quote, string< 'p', 'r', 'o', 't', 'o', '2' >, quote, sps, semi > {};
+  struct file : seq< sps, head, sps, star< body, sps >, eof > {};
 }
 
 namespace proto3 {
-  struct file : must< sps, head, sps, star< body, sps >, eof> {};
+  struct head : seq< keyword< 's', 'y', 'n', 't', 'a', 'x' >, sps, equ, sps, quote, string< 'p', 'r', 'o', 't', 'o', '3' >, quote, sps, semi > {};
+  struct file : seq< sps, head, sps, star< body, sps >, eof> {};
 }
 
-struct proto_file : sor< proto3::file, proto2::file > {};
+namespace edition {
+    struct head
+    : seq< keyword< 'e', 'd', 'i', 't', 'i', 'o', 'n' >, sps, equ, sps,
+           str_lit, sps, semi > {};
+    struct file : seq< sps, head, sps, star< body, sps >, eof > {};
+}
+
+struct proto_file : sor< edition::file, proto3::file, proto2::file > {};
 // clang-format on
 
 }// namespace proto::grammar
